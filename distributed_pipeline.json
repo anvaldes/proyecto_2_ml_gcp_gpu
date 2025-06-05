@@ -1,0 +1,149 @@
+{
+  "components": {
+    "comp-evaluation-step": {
+      "executorLabel": "exec-evaluation-step",
+      "inputDefinitions": {
+        "parameters": {
+          "gcs_path": {
+            "parameterType": "STRING"
+          },
+          "model_path": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-training-step": {
+      "executorLabel": "exec-training-step",
+      "inputDefinitions": {
+        "parameters": {
+          "gcs_path": {
+            "parameterType": "STRING"
+          },
+          "output_dir": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    }
+  },
+  "deploymentSpec": {
+    "executors": {
+      "exec-evaluation-step": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "evaluation_step"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage' 'transformers' 'datasets' 'scikit-learn' 'torch' 'pandas' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef evaluation_step(gcs_path: str, model_path: str):\n    import subprocess\n    subprocess.run([\n        'python3', 'evaluate.py',\n        f'--gcs_path={gcs_path}',\n        f'--model_path={model_path}'\n    ], check=True)\n\n"
+          ],
+          "image": "us-central1-docker.pkg.dev/proyecto-1-461620/my-kfp-repo/train-distributed:latest"
+        }
+      },
+      "exec-training-step": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "training_step"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage' 'transformers' 'datasets' 'scikit-learn' 'torch' 'accelerate' 'pandas' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef training_step(gcs_path: str, output_dir: str):\n    import subprocess\n    subprocess.run([\n        'accelerate', 'launch', 'train.py',\n        f'--gcs_path={gcs_path}',\n        f'--output_dir={output_dir}'\n    ], check=True)\n\n"
+          ],
+          "image": "us-central1-docker.pkg.dev/proyecto-1-461620/my-kfp-repo/train-distributed:latest"
+        }
+      }
+    }
+  },
+  "pipelineInfo": {
+    "name": "xgb-distributed-training-and-eval"
+  },
+  "root": {
+    "dag": {
+      "tasks": {
+        "evaluation-step": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-evaluation-step"
+          },
+          "dependentTasks": [
+            "training-step"
+          ],
+          "inputs": {
+            "parameters": {
+              "gcs_path": {
+                "componentInputParameter": "gcs_path"
+              },
+              "model_path": {
+                "runtimeValue": {
+                  "constant": "{{$.inputs.parameters['pipelinechannel--gcs_path']}}/outputs"
+                }
+              },
+              "pipelinechannel--gcs_path": {
+                "componentInputParameter": "gcs_path"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "evaluation-step"
+          }
+        },
+        "training-step": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-training-step"
+          },
+          "inputs": {
+            "parameters": {
+              "gcs_path": {
+                "componentInputParameter": "gcs_path"
+              },
+              "output_dir": {
+                "componentInputParameter": "output_dir"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "training-step"
+          }
+        }
+      }
+    },
+    "inputDefinitions": {
+      "parameters": {
+        "gcs_path": {
+          "defaultValue": "2025_06",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "output_dir": {
+          "defaultValue": "./results",
+          "isOptional": true,
+          "parameterType": "STRING"
+        }
+      }
+    }
+  },
+  "schemaVersion": "2.1.0",
+  "sdkVersion": "kfp-2.13.0"
+}
